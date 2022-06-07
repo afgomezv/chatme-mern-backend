@@ -30,7 +30,7 @@ async function getLastMessagesFromRoom(room) {
   return roomMessages;
 }
 
-function sortRoomMessageByDate(...messages) {
+function sortRoomMessagesByDate(messages) {
   return messages.sort(function (a, b) {
     let date1 = a._id.split("/");
     let date2 = b._id.split("/");
@@ -41,6 +41,7 @@ function sortRoomMessageByDate(...messages) {
     return date1 < date2 ? -1 : 1;
   });
 }
+
 // socket connection
 
 io.on("connection", (socket) => {
@@ -49,15 +50,15 @@ io.on("connection", (socket) => {
     io.emit("new-user", members);
   });
 
-  socket.on("join-room", async (room) => {
-    socket.join(room);
-    let roomMessages = await getLastMessagesFromRoom(room);
-    roomMessages = sortRoomMessageByDate(roomMessages);
+  socket.on("join-room", async (newRoom, previousRoom) => {
+    socket.join(newRoom);
+    socket.leave(previousRoom);
+    let roomMessages = await getLastMessagesFromRoom(newRoom);
+    roomMessages = sortRoomMessagesByDate(roomMessages);
     socket.emit("room-messages", roomMessages);
   });
 
   socket.on("message-room", async (room, content, sender, time, date) => {
-    console.log("new-message", content);
     const newMessage = await Message.create({
       content,
       from: sender,
@@ -65,12 +66,27 @@ io.on("connection", (socket) => {
       date,
       to: room,
     });
-    let roomMessages = sortRoomMessageByDate(room);
-    roomMessages = sortRoomMessageByDate(roomMessages);
-    //sending message to room
+    let roomMessages = await getLastMessagesFromRoom(room);
+    roomMessages = sortRoomMessagesByDate(roomMessages);
+    // sending message to room
     io.to(room).emit("room-messages", roomMessages);
-
     socket.broadcast.emit("notifications", room);
+  });
+
+  app.delete("/logout", async (req, res) => {
+    try {
+      const { _id, newMessages } = req.body;
+      const user = await User.findById(_id);
+      user.status = "offline";
+      user.newMessages = newMessages;
+      await user.save();
+      const members = await User.find();
+      socket.broadcast.emit("new-user", members);
+      res.status(200).send();
+    } catch (e) {
+      console.log(e);
+      res.status(400).send();
+    }
   });
 });
 
@@ -78,21 +94,6 @@ app.get("/rooms", (req, res) => {
   res.json(rooms);
 });
 
-app.delete("logout", async (req, res) => {
-  try {
-    const {} = req.body;
-    const user = await User.findById(_id);
-    user.status = "offline";
-    user.newMessage = newMessage;
-    const members = await User.find();
-    socket.broadcast.emit("new-user", member);
-    res.status(200).send();
-  } catch (e) {
-    console.log(e);
-    res.status(400).send();
-  }
-});
-
 server.listen(PORT, () => {
-  console.log("listenig to port", PORT);
+  console.log("listening to port", PORT);
 });
